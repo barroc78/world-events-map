@@ -1,0 +1,1246 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>World Events Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --surface2: #1c2128;
+      --border:   #30363d;
+      --text:     #e6edf3;
+      --muted:    #8b949e;
+      --accent:   #58a6ff;
+
+      --war:      #f85149;
+      --science:  #3fb950;
+      --politics: #58a6ff;
+      --disaster: #e3b341;
+      --culture:  #bc8cff;
+      --economy:  #f78166;
+      --other:    #79c0ff;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── HEADER ─────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      z-index: 1000;
+      flex-shrink: 0;
+    }
+
+    .brand {
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    }
+    .brand h1 {
+      font-size: 17px; font-weight: 700;
+      background: linear-gradient(90deg, #58a6ff, #79c0ff);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .brand small { font-size: 10px; color: var(--muted); display: block; margin-top: -2px; }
+
+    .filters {
+      display: flex; gap: 6px; flex-wrap: wrap; flex: 1;
+    }
+
+    .fbtn {
+      display: flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: 20px;
+      border: 1.5px solid var(--border);
+      background: transparent; color: var(--muted);
+      font-size: 11px; font-weight: 600; cursor: pointer;
+      transition: all .18s; white-space: nowrap;
+    }
+    .fbtn:hover { border-color: var(--accent); color: var(--accent); background: rgba(88,166,255,.08); }
+    .fbtn.active { color: #fff; border-color: transparent; }
+    .fbtn .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+    .fbtn[data-cat="all"].active      { background: #30363d; border-color: var(--accent); }
+    .fbtn[data-cat="war"].active      { background: var(--war); }
+    .fbtn[data-cat="science"].active  { background: var(--science); }
+    .fbtn[data-cat="politics"].active { background: var(--politics); }
+    .fbtn[data-cat="disaster"].active { background: var(--disaster); color:#000!important; }
+    .fbtn[data-cat="culture"].active  { background: var(--culture); }
+    .fbtn[data-cat="economy"].active  { background: var(--economy); }
+    .fbtn[data-cat="other"].active    { background: var(--other); }
+
+    .search-wrap { position: relative; flex-shrink: 0; }
+    .search-wrap input {
+      background: var(--bg); border: 1.5px solid var(--border);
+      border-radius: 20px; padding: 5px 14px 5px 32px;
+      color: var(--text); font-size: 12px; width: 190px; outline: none;
+      transition: border-color .2s;
+    }
+    .search-wrap input:focus { border-color: var(--accent); }
+    .search-wrap input::placeholder { color: #484f58; }
+    .search-wrap .si { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #484f58; }
+
+    /* ADD BUTTON */
+    .add-btn {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 16px; border-radius: 8px;
+      background: var(--accent); border: none; color: #000;
+      font-size: 12px; font-weight: 700; cursor: pointer;
+      transition: background .2s; flex-shrink: 0;
+    }
+    .add-btn:hover { background: #79c0ff; }
+    .add-btn.active { background: #f85149; color: #fff; }
+
+    /* ── STATS ──────────────────────────────────── */
+    .stats {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 5px 20px; display: flex; gap: 20px;
+      font-size: 11px; color: var(--muted); flex-shrink: 0; z-index: 999;
+    }
+    .stats b { color: var(--accent); }
+
+    /* ── MAIN ───────────────────────────────────── */
+    .main { display: flex; flex: 1; overflow: hidden; }
+
+    #map { flex: 1; z-index: 1; cursor: default; }
+    #map.adding { cursor: crosshair !important; }
+
+    /* ── SIDEBAR ────────────────────────────────── */
+    .sidebar {
+      width: 320px; background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .sb-head {
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+      flex-shrink: 0;
+    }
+    .sb-head h2 { font-size: 13px; font-weight: 600; }
+    .sb-head .cnt { font-size: 11px; color: var(--accent); background: rgba(88,166,255,.12); padding: 2px 8px; border-radius: 10px; }
+
+    .ev-list { overflow-y: auto; flex: 1; }
+    .ev-list::-webkit-scrollbar { width: 4px; }
+    .ev-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .ev-card {
+      padding: 12px 14px; border-bottom: 1px solid #21262d;
+      cursor: pointer; transition: background .15s;
+      display: flex; gap: 10px; align-items: flex-start;
+    }
+    .ev-card:hover { background: rgba(88,166,255,.06); }
+    .ev-card.sel { background: rgba(88,166,255,.1); border-left: 3px solid var(--accent); }
+
+    .ev-ico {
+      width: 34px; height: 34px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px; flex-shrink: 0;
+    }
+    .ev-body { flex: 1; min-width: 0; }
+    .ev-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ev-meta { display: flex; gap: 8px; margin-top: 3px; flex-wrap: wrap; align-items: center; }
+    .ev-date { font-size: 10px; color: var(--accent); font-weight: 700; }
+    .ev-loc  { font-size: 10px; color: var(--muted); }
+    .ev-desc { font-size: 10px; color: var(--muted); margin-top: 3px; line-height: 1.4;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .ev-user-badge {
+      font-size: 9px; background: rgba(88,166,255,.15); color: var(--accent);
+      border: 1px solid rgba(88,166,255,.3); border-radius: 4px; padding: 1px 5px;
+    }
+    .ev-actions { display: flex; gap: 4px; margin-top: 5px; }
+    .ev-btn {
+      font-size: 10px; padding: 2px 8px; border-radius: 5px; border: 1px solid var(--border);
+      background: transparent; color: var(--muted); cursor: pointer; transition: all .15s;
+    }
+    .ev-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .ev-btn.del:hover { border-color: var(--war); color: var(--war); }
+
+    .no-res { padding: 40px 20px; text-align: center; color: #484f58; }
+    .no-res span { font-size: 28px; display: block; margin-bottom: 8px; }
+
+    /* ── MODAL DODAWANIA ───────────────────────── */
+    .overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.65);
+      z-index: 9000; display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none; transition: opacity .2s;
+    }
+    .overlay.open { opacity: 1; pointer-events: all; }
+
+    .modal {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 14px; width: 480px; max-width: 95vw;
+      box-shadow: 0 20px 60px rgba(0,0,0,.7);
+      transform: translateY(20px); transition: transform .2s;
+      max-height: 90vh; overflow-y: auto;
+    }
+    .overlay.open .modal { transform: translateY(0); }
+
+    .modal-head {
+      padding: 18px 20px 14px; border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .modal-head h2 { font-size: 15px; font-weight: 700; }
+    .modal-close {
+      background: none; border: none; color: var(--muted); font-size: 20px;
+      cursor: pointer; line-height: 1; transition: color .15s;
+    }
+    .modal-close:hover { color: var(--text); }
+
+    .modal-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+
+    .field label {
+      display: block; font-size: 11px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .7px; margin-bottom: 5px;
+    }
+    .field input, .field textarea, .field select {
+      width: 100%; background: var(--bg); border: 1.5px solid var(--border);
+      border-radius: 8px; padding: 8px 12px; color: var(--text);
+      font-size: 13px; outline: none; transition: border-color .2s;
+      font-family: inherit;
+    }
+    .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--accent); }
+    .field textarea { resize: vertical; min-height: 80px; }
+    .field select option { background: var(--surface2); }
+
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .coords-display {
+      background: var(--bg); border: 1.5px solid var(--border); border-radius: 8px;
+      padding: 8px 12px; font-size: 12px; color: var(--muted); display: flex;
+      align-items: center; gap: 8px;
+    }
+    .coords-display.set { border-color: var(--science); color: var(--science); }
+
+    .emoji-grid {
+      display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px;
+    }
+    .emoji-opt {
+      aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+      font-size: 20px; border-radius: 6px; border: 1.5px solid transparent;
+      cursor: pointer; transition: all .15s; background: var(--bg);
+    }
+    .emoji-opt:hover { background: rgba(88,166,255,.1); border-color: var(--accent); }
+    .emoji-opt.sel { border-color: var(--accent); background: rgba(88,166,255,.15); }
+
+    .cat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .cat-opt {
+      padding: 7px 4px; border-radius: 8px; border: 1.5px solid var(--border);
+      background: transparent; color: var(--muted); font-size: 11px; font-weight: 600;
+      cursor: pointer; text-align: center; transition: all .15s;
+    }
+    .cat-opt:hover { border-color: var(--accent); color: var(--accent); }
+    .cat-opt.sel { color: #fff; border-color: transparent; }
+    .cat-opt[data-v="war"].sel      { background: var(--war); }
+    .cat-opt[data-v="science"].sel  { background: var(--science); }
+    .cat-opt[data-v="politics"].sel { background: var(--politics); }
+    .cat-opt[data-v="disaster"].sel { background: var(--disaster); color:#000!important; }
+    .cat-opt[data-v="culture"].sel  { background: var(--culture); }
+    .cat-opt[data-v="economy"].sel  { background: var(--economy); }
+    .cat-opt[data-v="other"].sel    { background: var(--other); }
+
+    .modal-foot {
+      padding: 14px 20px; border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; gap: 10px;
+    }
+    .btn-cancel {
+      padding: 8px 18px; border-radius: 8px; border: 1.5px solid var(--border);
+      background: transparent; color: var(--muted); font-size: 13px; cursor: pointer;
+      transition: all .15s;
+    }
+    .btn-cancel:hover { border-color: var(--text); color: var(--text); }
+    .btn-save {
+      padding: 8px 22px; border-radius: 8px; border: none;
+      background: var(--accent); color: #000; font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: background .15s;
+    }
+    .btn-save:hover { background: #79c0ff; }
+    .btn-save:disabled { background: #30363d; color: #484f58; cursor: not-allowed; }
+
+    /* ── HINT ───────────────────────────────────── */
+    .map-hint {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: rgba(22,27,34,.95); border: 1.5px solid var(--accent);
+      border-radius: 12px; padding: 14px 22px; z-index: 500;
+      text-align: center; pointer-events: none;
+      animation: pulse 1.5s infinite;
+      display: none;
+    }
+    .map-hint.show { display: block; }
+    .map-hint p { font-size: 14px; font-weight: 700; color: var(--accent); }
+    .map-hint small { font-size: 11px; color: var(--muted); }
+
+    @keyframes pulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(88,166,255,.4); }
+      50%      { box-shadow: 0 0 0 8px rgba(88,166,255,0); }
+    }
+
+    /* ── POPUP ──────────────────────────────────── */
+    .leaflet-popup-content-wrapper {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.5);
+      color: var(--text); max-width: 290px;
+    }
+    .leaflet-popup-tip { background: var(--surface2); }
+    .leaflet-popup-content { margin: 14px 16px; }
+
+    .pu-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+    .pu-emoji { font-size: 26px; line-height: 1; }
+    .pu-title { font-size: 14px; font-weight: 700; line-height: 1.3; }
+    .pu-date  { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 8px; margin-bottom: 6px; display: inline-block; }
+    .pu-loc   { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+    .pu-desc  { font-size: 12px; color: #c9d1d9; line-height: 1.55; margin-bottom: 10px; }
+    .pu-src   { font-size: 11px; }
+    .pu-src a { color: var(--accent); text-decoration: none; }
+    .pu-src a:hover { text-decoration: underline; }
+    .pu-actions { display: flex; gap: 6px; margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+    .pu-btn {
+      flex: 1; padding: 5px; border-radius: 6px; border: 1px solid var(--border);
+      background: transparent; color: var(--muted); font-size: 11px; cursor: pointer;
+      transition: all .15s; text-align: center;
+    }
+    .pu-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .pu-btn.del:hover { border-color: var(--war); color: var(--war); }
+
+    /* ── LEGEND ─────────────────────────────────── */
+    .legend {
+      position: absolute; bottom: 20px; left: 12px;
+      background: rgba(22,27,34,.95); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 14px; z-index: 500; font-size: 11px;
+    }
+    .legend h3 { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 7px; font-weight: 700; }
+    .leg-item { display: flex; align-items: center; gap: 7px; padding: 1px 0; color: #c9d1d9; }
+    .leg-dot { width: 9px; height: 9px; border-radius: 50%; }
+
+    /* ── TOAST ──────────────────────────────────── */
+    .toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(60px);
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 20px; font-size: 13px; z-index: 9999;
+      transition: transform .3s; white-space: nowrap;
+      box-shadow: 0 4px 20px rgba(0,0,0,.5);
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+    .toast.ok   { border-color: var(--science); color: var(--science); }
+    .toast.err  { border-color: var(--war);     color: var(--war); }
+    .toast.info { border-color: var(--accent);  color: var(--accent); }
+
+    /* scrollbar całości */
+    .modal::-webkit-scrollbar { width: 4px; }
+    .modal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="brand">
+    <span style="font-size:22px">🌍</span>
+    <div><h1>World Events Map</h1><small>Twoja mapa bieżących wydarzeń</small></div>
+  </div>
+
+  <div class="filters" id="filters">
+    <button class="fbtn active" data-cat="all"      onclick="setFilter('all',this)"><span class="dot" style="background:#8b949e"></span>Wszystkie</button>
+    <button class="fbtn"        data-cat="war"      onclick="setFilter('war',this)"><span class="dot" style="background:var(--war)"></span>Konflikty</button>
+    <button class="fbtn"        data-cat="science"  onclick="setFilter('science',this)"><span class="dot" style="background:var(--science)"></span>Nauka</button>
+    <button class="fbtn"        data-cat="politics" onclick="setFilter('politics',this)"><span class="dot" style="background:var(--politics)"></span>Polityka</button>
+    <button class="fbtn"        data-cat="disaster" onclick="setFilter('disaster',this)"><span class="dot" style="background:var(--disaster)"></span>Katastrofy</button>
+    <button class="fbtn"        data-cat="culture"  onclick="setFilter('culture',this)"><span class="dot" style="background:var(--culture)"></span>Kultura</button>
+    <button class="fbtn"        data-cat="economy"  onclick="setFilter('economy',this)"><span class="dot" style="background:var(--economy)"></span>Gospodarka</button>
+    <button class="fbtn"        data-cat="other"    onclick="setFilter('other',this)"><span class="dot" style="background:var(--other)"></span>Inne</button>
+  </div>
+
+  <div class="search-wrap">
+    <span class="si">🔍</span>
+    <input type="text" id="searchInput" placeholder="Szukaj..." oninput="onSearch(this.value)"/>
+  </div>
+
+  <button class="add-btn" id="addBtn" onclick="toggleAddMode()" style="display:none">
+    <span id="addBtnIcon">＋</span> <span id="addBtnLabel">Dodaj wydarzenie</span>
+  </button>
+  <button class="add-btn" id="adminLoginBtn" onclick="promptAdminLogin()"
+    style="background:#30363d;color:#8b949e;font-size:11px;padding:5px 12px">
+    🔒 Admin
+  </button>
+</header>
+
+<div class="stats" id="statsBar">
+  <span>📍 Na mapie: <b id="visCount">0</b></span>
+  <span>✏️ Twoje: <b id="userCount">0</b></span>
+  <span id="selInfo" style="color:var(--accent);display:none"></span>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+  <div id="map">
+    <div class="map-hint" id="mapHint">
+      <p>🎯 Kliknij na mapie</p>
+      <small>aby umieścić wydarzenie w tym miejscu</small>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="sb-head">
+      <h2>📋 Wydarzenia</h2>
+      <span class="cnt" id="sbCount">0</span>
+    </div>
+    <div class="ev-list" id="evList"></div>
+  </div>
+</div>
+
+<!-- LEGENDA -->
+<div class="legend">
+  <h3>Legenda</h3>
+  <div class="leg-item"><span class="leg-dot" style="background:var(--war)"></span>Konflikty</div>
+  <div class="leg-item"><span class="leg-dot" style="background:var(--science)"></span>Nauka</div>
+  <div class="leg-item"><span class="leg-dot" style="background:var(--politics)"></span>Polityka</div>
+  <div class="leg-item"><span class="leg-dot" style="background:var(--disaster)"></span>Katastrofy</div>
+  <div class="leg-item"><span class="leg-dot" style="background:var(--culture)"></span>Kultura</div>
+  <div class="leg-item"><span class="leg-dot" style="background:var(--economy)"></span>Gospodarka</div>
+  <div class="leg-item"><span class="leg-dot" style="background:var(--other)"></span>Inne</div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- MODAL -->
+<div class="overlay" id="overlay" onclick="overlayClick(event)">
+  <div class="modal" id="modal">
+    <div class="modal-head">
+      <h2 id="modalTitle">➕ Nowe wydarzenie</h2>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- TYTUŁ -->
+      <div class="field">
+        <label>Tytuł wydarzenia *</label>
+        <input type="text" id="fTitle" placeholder="np. Konferencja klimatyczna COP30" maxlength="100"/>
+      </div>
+
+      <!-- DATA + LOKALIZACJA -->
+      <div class="field-row">
+        <div class="field">
+          <label>Data</label>
+          <input type="date" id="fDate"/>
+        </div>
+        <div class="field">
+          <label>Lokalizacja</label>
+          <input type="text" id="fLoc" placeholder="np. Warszawa, Polska"/>
+        </div>
+      </div>
+
+      <!-- WSPÓŁRZĘDNE -->
+      <div class="field">
+        <label>Współrzędne (kliknij na mapie lub wpisz)</label>
+        <div style="display:flex;gap:8px;margin-bottom:6px">
+          <input type="number" id="fLat" placeholder="Szerokość geo." step="0.0001" style="flex:1"/>
+          <input type="number" id="fLng" placeholder="Długość geo."   step="0.0001" style="flex:1"/>
+        </div>
+        <div class="coords-display" id="coordsDisplay">
+          📍 Brak lokalizacji — kliknij na mapie lub wpisz ręcznie
+        </div>
+      </div>
+
+      <!-- KATEGORIA -->
+      <div class="field">
+        <label>Kategoria *</label>
+        <div class="cat-grid">
+          <button class="cat-opt" data-v="war"      onclick="selCat(this)">⚔️ Konflikt</button>
+          <button class="cat-opt" data-v="science"  onclick="selCat(this)">🔬 Nauka</button>
+          <button class="cat-opt" data-v="politics" onclick="selCat(this)">🏛️ Polityka</button>
+          <button class="cat-opt" data-v="disaster" onclick="selCat(this)">⚠️ Katastrofa</button>
+          <button class="cat-opt" data-v="culture"  onclick="selCat(this)">🎭 Kultura</button>
+          <button class="cat-opt" data-v="economy"  onclick="selCat(this)">📈 Gospodarka</button>
+          <button class="cat-opt sel" data-v="other" onclick="selCat(this)">🌐 Inne</button>
+        </div>
+        <input type="hidden" id="fCat" value="other"/>
+      </div>
+
+      <!-- EMOJI -->
+      <div class="field">
+        <label>Ikona</label>
+        <div class="emoji-grid" id="emojiGrid">
+          <!-- wypełniane przez JS -->
+        </div>
+        <input type="hidden" id="fEmoji" value="📌"/>
+      </div>
+
+      <!-- OPIS -->
+      <div class="field">
+        <label>Opis</label>
+        <textarea id="fDesc" placeholder="Krótki opis wydarzenia..."></textarea>
+      </div>
+
+      <!-- KRAJE -->
+      <div class="field">
+        <label>🗺️ Zaangażowane kraje (opcjonalnie)</label>
+        <input type="text" id="fCountries" placeholder="np. Irak, Syria, Iran, Izrael"/>
+        <div style="font-size:10px;color:#484f58;margin-top:4px">Oddziel przecinkami — granice tych krajów podświetlą się na mapie po kliknięciu markera</div>
+      </div>
+
+      <!-- ŹRÓDŁO -->
+      <div class="field">
+        <label>Źródło / Link (opcjonalnie)</label>
+        <input type="url" id="fSrc" placeholder="https://..."/>
+      </div>
+
+    </div>
+    <div class="modal-foot">
+      <button class="btn-cancel" onclick="closeModal()">Anuluj</button>
+      <button class="btn-save"   id="btnSave" onclick="saveEvent()">💾 Zapisz wydarzenie</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ═══════════════════════════════════════════════════
+// STAŁE
+// ═══════════════════════════════════════════════════
+const STORAGE_KEY = 'wem_user_events_v3';
+
+// ── Wydarzenia wbudowane (dodawane przez Claude z linków) ──
+const DEFAULT_EVENTS = [
+  {
+    id: "de_1741903200001",
+    title: "Ukraina zmienia zasady obrony powietrznej",
+    cat: "war",
+    emoji: "🛸",
+    date: "2026-03-13",
+    loc: "Bliski Wschód (Irak/Syria/Izrael)",
+    lat: 33.3,
+    lng: 43.8,
+    desc: "Ukraina jako pierwszy kraj świata opracowała masową produkcję tanich dronów przechwytujących FPV (~2500 USD) do niszczenia irańskich szahidów. Kraje Zatoki Perskiej pilnie poszukują ukraińskiego know-how — skuteczność obrony dronowej przekracza 80%. Produkcja: ponad 1500 dronów dziennie.",
+    src: "https://www.onet.pl/informacje/sestry/ukraina-zmienia-zasady-obrony-powietrznej-duza-szansa-dla-kijowa/zvnn7mk,0666d3f1",
+    countries: ["IRQ", "SYR", "IRN", "ISR", "ARE", "SAU", "KWT", "UKR"]
+  }
+];
+
+// ── Słownik: ISO-A3 → numeric ID (world-atlas) + polskie nazwy ──
+const COUNTRY_ISO = {
+  // Europa
+  'POL':616,'UKR':804,'RUS':643,'DEU':276,'FRA':250,'GBR':826,'BLR':112,
+  'CZE':203,'SVK':703,'HUN':348,'ROU':642,'BGR':100,'SRB':688,'HRV':191,
+  'SVN':705,'AUT':040,'CHE':756,'ITA':380,'ESP':724,'PRT':620,'NLD':528,
+  'BEL':056,'LUX':442,'DNK':208,'SWE':752,'NOR':578,'FIN':246,'EST':233,
+  'LVA':428,'LTU':440,'GRC':300,'ALB':008,'MKD':807,'BIH':070,'MNE':499,
+  'MDA':498,'BLR':112,'LIE':438,'ISL':352,'IRL':372,'CYP':196,'MLT':470,
+  // Bliski Wschód
+  'IRQ':368,'SYR':760,'IRN':364,'ISR':376,'PSE':275,'LBN':422,'JOR':400,
+  'ARE':784,'SAU':682,'KWT':414,'QAT':634,'BHR':048,'OMN':512,'YEM':887,
+  'TUR':792,'ARM':051,'AZE':031,'GEO':268,'CYP':196,
+  // Azja
+  'CHN':156,'JPN':392,'KOR':410,'PRK':408,'IND':356,'PAK':586,'AFG':004,
+  'BGD':050,'LKA':144,'MMR':104,'THA':764,'VNM':704,'IDN':360,'PHL':608,
+  'MYS':458,'SGP':702,'KAZ':398,'UZB':860,'TKM':795,'TJK':762,'KGZ':417,
+  'MNG':496,'NPL':524,'BTN':064,'MDV':462,'TWN':158,
+  // Afryka
+  'EGY':818,'LBY':434,'TUN':788,'DZA':012,'MAR':504,'SDN':729,'ETH':231,
+  'SOM':706,'KEN':404,'TZA':834,'UGA':800,'RWA':646,'COD':180,'NGA':566,
+  'GHA':288,'CIV':384,'SEN':686,'MLI':466,'NER':562,'ZAF':710,'ZWE':716,
+  'MOZ':508,'ZMB':894,'AGO':024,'CMR':120,'GAB':266,'COG':178,
+  // Ameryki
+  'USA':840,'CAN':124,'MEX':484,'BRA':076,'ARG':032,'CHL':152,'COL':170,
+  'VEN':862,'PER':604,'BOL':068,'ECU':218,'PRY':600,'URY':858,'CUB':192,
+  // Oceania
+  'AUS':036,'NZL':554,'PNG':598,
+};
+
+// Polskie i angielskie nazwy → ISO-A3
+const COUNTRY_NAME_MAP = {
+  'polska':         'POL','poland':          'POL',
+  'ukraina':        'UKR','ukraine':         'UKR',
+  'rosja':          'RUS','russia':          'RUS',
+  'niemcy':         'DEU','germany':         'DEU',
+  'francja':        'FRA','france':          'FRA',
+  'wielka brytania':'GBR','uk':              'GBR','united kingdom':  'GBR',
+  'białoruś':       'BLR','belarus':         'BLR',
+  'irak':           'IRQ','iraq':            'IRQ',
+  'syria':          'SYR',
+  'iran':           'IRN',
+  'izrael':         'ISR','israel':          'ISR',
+  'palestyna':      'PSE','palestine':       'PSE',
+  'liban':          'LBN','lebanon':         'LBN',
+  'jordania':       'JOR','jordan':          'JOR',
+  'zea':            'ARE','zjednoczone emiraty arabskie':'ARE','uae':'ARE',
+  'arabia saudyjska':'SAU','saudi arabia':   'SAU',
+  'kuwejt':         'KWT','kuwait':          'KWT',
+  'katar':          'QAT','qatar':           'QAT',
+  'turcja':         'TUR','turkey':          'TUR','türkiye':'TUR',
+  'egipt':          'EGY','egypt':           'EGY',
+  'chiny':          'CHN','china':           'CHN',
+  'japonia':        'JPN','japan':           'JPN',
+  'indie':          'IND','india':           'IND',
+  'usa':            'USA','stany zjednoczone':'USA','united states':'USA',
+  'kanada':         'CAN','canada':          'CAN',
+  'brazylia':       'BRA','brazil':          'BRA',
+  'niemcy':         'DEU','czechy':          'CZE',
+  'afganistan':     'AFG','afghanistan':     'AFG',
+  'pakistan':       'PAK',
+  'nigeria':        'NGA',
+  'etiopia':        'ETH','ethiopia':        'ETH',
+  'somalia':        'SOM',
+  'jemen':          'YEM','yemen':           'YEM',
+};
+
+function parseCountries(str) {
+  if (!str) return [];
+  return str.split(',')
+    .map(s => s.trim().toLowerCase())
+    .map(s => {
+      // ISO-A3 bezpośrednio (np. "IRQ")
+      const upper = s.toUpperCase();
+      if (COUNTRY_ISO[upper]) return upper;
+      // po nazwie
+      return COUNTRY_NAME_MAP[s] || null;
+    })
+    .filter(Boolean);
+}
+
+const CAT_COLOR = {
+  war:'#f85149', science:'#3fb950', politics:'#58a6ff',
+  disaster:'#e3b341', culture:'#bc8cff', economy:'#f78166', other:'#79c0ff'
+};
+const CAT_BG = Object.fromEntries(
+  Object.entries(CAT_COLOR).map(([k,v]) => [k, v+'22'])
+);
+
+const EMOJIS = [
+  '📌','🗺️','⚔️','💥','🔥','☢️','🌊','🌪️','❄️','☀️',
+  '🏛️','🗽','🇺🇳','🤝','✊','🚀','🛸','✈️','🚂','🚢',
+  '🔬','💊','🧬','⚛️','🌐','💻','📱','🤖','🧠','💡',
+  '📉','📈','💰','🏦','⚡','🌱','🌍','🎭','🎸','🏆',
+  '🔴','🟡','🟢','🔵','⚪','⭐','💫','⚡','🛑','❗',
+];
+
+// ═══════════════════════════════════════════════════
+// MAPA
+// ═══════════════════════════════════════════════════
+const map = L.map('map', { center:[20,15], zoom:2, minZoom:2, maxZoom:13, zoomControl:true });
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
+}).addTo(map);
+
+// ═══════════════════════════════════════════════════
+// GRANICE KRAJÓW (topojson)
+// ═══════════════════════════════════════════════════
+let worldTopo       = null;
+let highlightLayer  = null;
+
+async function loadWorldTopo() {
+  try {
+    const res = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+    worldTopo = await res.json();
+  } catch(e) { console.warn('Nie można załadować granic krajów:', e); }
+}
+
+function highlightCountries(isoCodes, cat) {
+  if (highlightLayer) { highlightLayer.remove(); highlightLayer = null; }
+  if (!worldTopo || !isoCodes || !isoCodes.length) return;
+
+  const color = CAT_COLOR[cat] || CAT_COLOR.other;
+  const numIds = new Set(isoCodes.map(c => COUNTRY_ISO[c]).filter(Boolean).map(String));
+  if (!numIds.size) return;
+
+  const geo = topojson.feature(worldTopo, worldTopo.objects.countries);
+  const filtered = { type:'FeatureCollection',
+    features: geo.features.filter(f => numIds.has(f.id)) };
+  if (!filtered.features.length) return;
+
+  highlightLayer = L.geoJSON(filtered, {
+    style: {
+      fillColor:   color,
+      fillOpacity: 0.18,
+      color:       color,
+      weight:      2.5,
+      opacity:     0.9,
+      dashArray:   null,
+    }
+  }).addTo(map);
+  highlightLayer.bringToBack();
+}
+
+function clearHighlight() {
+  if (highlightLayer) { highlightLayer.remove(); highlightLayer = null; }
+}
+
+// ═══════════════════════════════════════════════════
+// STAN
+// ═══════════════════════════════════════════════════
+let events   = [];
+let markers  = {};
+let activeFilter = 'all';
+let searchQ  = '';
+let addMode  = false;
+let editId   = null;
+let pendingLatLng = null;
+let selId    = null;
+
+// ═══════════════════════════════════════════════════
+// STORAGE — DEFAULT_EVENTS (z pliku) + user events (localStorage)
+// ═══════════════════════════════════════════════════
+function loadEvents() {
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch(e) { saved = []; }
+
+  const savedMap = new Map(saved.map(e => [e.id, e]));
+  const defaultIds = new Set(DEFAULT_EVENTS.map(d => d.id));
+
+  // 1. DEFAULT_EVENTS — użyj zapisanej wersji jeśli była edytowana, inaczej oryginał
+  const merged = DEFAULT_EVENTS.map(d => savedMap.has(d.id) ? savedMap.get(d.id) : d);
+
+  // 2. Dodaj nowe zdarzenia użytkownika (nie będące w DEFAULT_EVENTS)
+  const userOnly = saved.filter(e => !defaultIds.has(e.id));
+
+  events = [...merged, ...userOnly];
+
+  render();
+  if (!events.length) {
+    setTimeout(() => toast('👋 Witaj! Kliknij „Dodaj wydarzenie" lub naciśnij N.', 'info'), 600);
+  }
+}
+
+function saveStorage() {
+  // Zapisuj WSZYSTKIE zdarzenia — zarówno edytowane domyślne jak i nowe
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
+}
+
+// ═══════════════════════════════════════════════════
+// FILTROWANIE
+// ═══════════════════════════════════════════════════
+function isVisible(ev) {
+  const catOk  = activeFilter === 'all' || ev.cat === activeFilter;
+  const q = searchQ.toLowerCase();
+  const srchOk = !q || ev.title.toLowerCase().includes(q)
+                   || (ev.loc||'').toLowerCase().includes(q)
+                   || (ev.date||'').includes(q)
+                   || (ev.desc||'').toLowerCase().includes(q);
+  return catOk && srchOk;
+}
+
+// ═══════════════════════════════════════════════════
+// MARKER ICON
+// ═══════════════════════════════════════════════════
+function makeIcon(ev) {
+  const c = CAT_COLOR[ev.cat] || CAT_COLOR.other;
+  const bg = CAT_BG[ev.cat]   || CAT_BG.other;
+  return L.divIcon({
+    html: `<div style="
+      background:${bg}; border:2px solid ${c};
+      border-radius:50%; width:36px;height:36px;
+      display:flex;align-items:center;justify-content:center;
+      font-size:18px; box-shadow:0 0 12px ${c}66;
+      cursor:pointer;">${ev.emoji||'📌'}</div>`,
+    className:'', iconSize:[36,36], iconAnchor:[18,18]
+  });
+}
+
+// ═══════════════════════════════════════════════════
+// POPUP
+// ═══════════════════════════════════════════════════
+function makePopup(ev) {
+  const c = CAT_COLOR[ev.cat] || CAT_COLOR.other;
+  const dateStr = ev.date ? `<span class="pu-date" style="background:${c}22;color:${c};border:1px solid ${c}44">📅 ${ev.date}</span>` : '';
+  const locStr  = ev.loc  ? `<div class="pu-loc">📍 ${ev.loc}</div>` : '';
+  const descStr = ev.desc ? `<div class="pu-desc">${ev.desc}</div>` : '';
+  const srcStr  = ev.src  ? `<div class="pu-src">🔗 <a href="${ev.src}" target="_blank">Źródło / więcej</a></div>` : '';
+  return `
+    <div class="pu-head">
+      <span class="pu-emoji">${ev.emoji||'📌'}</span>
+      <span class="pu-title">${ev.title}</span>
+    </div>
+    ${dateStr}${locStr}${descStr}${srcStr}
+    ${isAdmin ? `<div class="pu-actions">
+      <button class="pu-btn" onclick="openEditModal('${ev.id}')">✏️ Edytuj</button>
+      <button class="pu-btn del" onclick="deleteEvent('${ev.id}')">🗑️ Usuń</button>
+    </div>` : ''}`;
+}
+
+// ═══════════════════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════════════════
+function render() {
+  // usuń stare markery
+  Object.values(markers).forEach(m => m.remove());
+  markers = {};
+
+  const vis = events.filter(isVisible);
+
+  vis.forEach(ev => {
+    if (ev.lat == null || ev.lng == null) return;
+    const m = L.marker([ev.lat, ev.lng], { icon: makeIcon(ev), draggable: true })
+      .addTo(map)
+      .bindPopup(makePopup(ev), { maxWidth:290, className:'custom-popup' })
+      .on('click', () => selectEv(ev.id))
+      .on('dragstart', () => { m.closePopup(); showDragBar(ev.id, null); })
+      .on('drag',      (e) => { showDragBar(ev.id, e.latlng); })
+      .on('dragend',   (e) => { showDragBar(ev.id, e.target.getLatLng(), true); });
+    markers[ev.id] = m;
+  });
+
+  document.getElementById('visCount').textContent  = vis.filter(e=>e.lat!=null).length;
+  document.getElementById('userCount').textContent = events.length;
+  document.getElementById('sbCount').textContent   = vis.length;
+
+  renderSidebar(vis);
+}
+
+function renderSidebar(vis) {
+  const list = document.getElementById('evList');
+  if (!vis.length) {
+    list.innerHTML = `<div class="no-res"><span>🔍</span>Brak wydarzeń<br>
+      <small style="font-size:11px">Dodaj pierwsze wydarzenie klikając „Dodaj wydarzenie"</small></div>`;
+    return;
+  }
+
+  const sorted = [...vis].sort((a,b) => (b.date||'').localeCompare(a.date||''));
+
+  list.innerHTML = sorted.map(ev => {
+    const c  = CAT_COLOR[ev.cat]||CAT_COLOR.other;
+    const bg = CAT_BG[ev.cat]||CAT_BG.other;
+    return `
+    <div class="ev-card ${selId===ev.id?'sel':''}" id="card-${ev.id}" onclick="selectEv('${ev.id}')">
+      <div class="ev-ico" style="background:${bg};border:1px solid ${c}44">${ev.emoji||'📌'}</div>
+      <div class="ev-body">
+        <div class="ev-title">${ev.title}</div>
+        <div class="ev-meta">
+          ${ev.date ? `<span class="ev-date">📅 ${ev.date}</span>` : ''}
+          ${ev.loc  ? `<span class="ev-loc">📍 ${ev.loc}</span>` : ''}
+        </div>
+        ${ev.desc ? `<div class="ev-desc">${ev.desc}</div>` : ''}
+        ${isAdmin ? `<div class="ev-actions">
+          <button class="ev-btn" onclick="event.stopPropagation();openEditModal('${ev.id}')">✏️ Edytuj</button>
+          <button class="ev-btn del" onclick="event.stopPropagation();deleteEvent('${ev.id}')">🗑️ Usuń</button>
+        </div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════
+// SELEKCJA
+// ═══════════════════════════════════════════════════
+function selectEv(id) {
+  selId = id;
+  const ev = events.find(e => e.id === id);
+  if (!ev) return;
+
+  document.querySelectorAll('.ev-card').forEach(c => c.classList.remove('sel'));
+  const card = document.getElementById(`card-${id}`);
+  if (card) { card.classList.add('sel'); card.scrollIntoView({behavior:'smooth',block:'nearest'}); }
+
+  const info = document.getElementById('selInfo');
+  info.style.display = 'inline';
+  info.textContent = `✨ ${ev.title}${ev.date?' ('+ev.date+')':''}`;
+
+  // Podświetl zaangażowane kraje
+  highlightCountries(ev.countries || [], ev.cat);
+
+  if (ev.lat != null && ev.lng != null) {
+    map.flyTo([ev.lat, ev.lng], 5, { duration:1 });
+    setTimeout(() => markers[id]?.openPopup(), 1050);
+  }
+}
+
+// Czyść podświetlenie po zamknięciu popupu
+map.on('popupclose', clearHighlight);
+
+// ═══════════════════════════════════════════════════
+// TRYB DODAWANIA
+// ═══════════════════════════════════════════════════
+function toggleAddMode() {
+  addMode = !addMode;
+  const btn   = document.getElementById('addBtn');
+  const hint  = document.getElementById('mapHint');
+  const mapEl = document.getElementById('map');
+
+  if (addMode) {
+    btn.classList.add('active');
+    document.getElementById('addBtnIcon').textContent = '✕';
+    document.getElementById('addBtnLabel').textContent = 'Anuluj';
+    hint.classList.add('show');
+    mapEl.classList.add('adding');
+    toast('Kliknij na mapie, aby wybrać lokalizację', 'info');
+  } else {
+    btn.classList.remove('active');
+    document.getElementById('addBtnIcon').textContent = '＋';
+    document.getElementById('addBtnLabel').textContent = 'Dodaj wydarzenie';
+    hint.classList.remove('show');
+    mapEl.classList.remove('adding');
+  }
+}
+
+map.on('click', function(e) {
+  if (!addMode) return;
+  pendingLatLng = e.latlng;
+  toggleAddMode();
+  openAddModal(e.latlng);
+});
+
+// ═══════════════════════════════════════════════════
+// MODAL
+// ═══════════════════════════════════════════════════
+function buildEmojiGrid(selected) {
+  const grid = document.getElementById('emojiGrid');
+  grid.innerHTML = EMOJIS.map(em =>
+    `<div class="emoji-opt ${em===selected?'sel':''}" onclick="selEmoji(this,'${em}')">${em}</div>`
+  ).join('');
+}
+
+function openAddModal(latlng) {
+  editId = null;
+  pendingLatLng = latlng || null;
+
+  // reset formularza
+  document.getElementById('fTitle').value = '';
+  document.getElementById('fDate').value  = new Date().toISOString().slice(0,10);
+  document.getElementById('fLoc').value   = '';
+  document.getElementById('fDesc').value  = '';
+  document.getElementById('fSrc').value      = '';
+  document.getElementById('fCountries').value = '';
+  document.getElementById('fEmoji').value = '📌';
+  document.getElementById('fCat').value   = 'other';
+  document.getElementById('fLat').value   = latlng ? latlng.lat.toFixed(4) : '';
+  document.getElementById('fLng').value   = latlng ? latlng.lng.toFixed(4) : '';
+
+  document.querySelectorAll('.cat-opt').forEach(b => {
+    b.classList.toggle('sel', b.dataset.v === 'other');
+  });
+
+  buildEmojiGrid('📌');
+  updateCoordsDisplay(latlng);
+  document.getElementById('modalTitle').textContent = '➕ Nowe wydarzenie';
+  document.getElementById('btnSave').textContent    = '💾 Zapisz wydarzenie';
+
+  document.getElementById('overlay').classList.add('open');
+  setTimeout(() => document.getElementById('fTitle').focus(), 200);
+}
+
+function openEditModal(id) {
+  const ev = events.find(e => e.id === id);
+  if (!ev) return;
+  editId = id;
+  map.closePopup();
+
+  document.getElementById('fTitle').value = ev.title || '';
+  document.getElementById('fDate').value  = ev.date  || '';
+  document.getElementById('fLoc').value   = ev.loc   || '';
+  document.getElementById('fDesc').value  = ev.desc  || '';
+  document.getElementById('fSrc').value      = ev.src   || '';
+  document.getElementById('fCountries').value = (ev.countries || []).join(', ');
+  document.getElementById('fEmoji').value = ev.emoji || '📌';
+  document.getElementById('fCat').value   = ev.cat   || 'other';
+  document.getElementById('fLat').value   = ev.lat != null ? ev.lat.toFixed(4) : '';
+  document.getElementById('fLng').value   = ev.lng != null ? ev.lng.toFixed(4) : '';
+
+  document.querySelectorAll('.cat-opt').forEach(b => {
+    b.classList.toggle('sel', b.dataset.v === ev.cat);
+  });
+
+  buildEmojiGrid(ev.emoji || '📌');
+  updateCoordsDisplay(ev.lat != null ? {lat:ev.lat,lng:ev.lng} : null);
+  document.getElementById('modalTitle').textContent = '✏️ Edytuj wydarzenie';
+  document.getElementById('btnSave').textContent    = '💾 Zaktualizuj';
+
+  document.getElementById('overlay').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('overlay').classList.remove('open');
+  editId = null;
+  pendingLatLng = null;
+}
+
+function overlayClick(e) {
+  if (e.target === document.getElementById('overlay')) closeModal();
+}
+
+// współrzędne — ręczny wpis
+document.getElementById('fLat').addEventListener('input', syncCoordsFromInputs);
+document.getElementById('fLng').addEventListener('input', syncCoordsFromInputs);
+
+function syncCoordsFromInputs() {
+  const lat = parseFloat(document.getElementById('fLat').value);
+  const lng = parseFloat(document.getElementById('fLng').value);
+  if (!isNaN(lat) && !isNaN(lng)) {
+    updateCoordsDisplay({lat,lng});
+  } else {
+    updateCoordsDisplay(null);
+  }
+}
+
+function updateCoordsDisplay(latlng) {
+  const d = document.getElementById('coordsDisplay');
+  if (latlng) {
+    const lat = typeof latlng.lat === 'function' ? latlng.lat() : latlng.lat;
+    const lng = typeof latlng.lng === 'function' ? latlng.lng() : latlng.lng;
+    d.textContent = `✅ ${parseFloat(lat).toFixed(4)}° N, ${parseFloat(lng).toFixed(4)}° E`;
+    d.className = 'coords-display set';
+  } else {
+    d.textContent = '📍 Brak — kliknij na mapie lub wpisz ręcznie';
+    d.className = 'coords-display';
+  }
+}
+
+function selCat(btn) {
+  document.querySelectorAll('.cat-opt').forEach(b => b.classList.remove('sel'));
+  btn.classList.add('sel');
+  document.getElementById('fCat').value = btn.dataset.v;
+}
+
+function selEmoji(el, em) {
+  document.querySelectorAll('.emoji-opt').forEach(e => e.classList.remove('sel'));
+  el.classList.add('sel');
+  document.getElementById('fEmoji').value = em;
+}
+
+// ═══════════════════════════════════════════════════
+// ZAPIS
+// ═══════════════════════════════════════════════════
+function saveEvent() {
+  const title = document.getElementById('fTitle').value.trim();
+  const cat   = document.getElementById('fCat').value;
+  const emoji = document.getElementById('fEmoji').value;
+  const date  = document.getElementById('fDate').value;
+  const loc   = document.getElementById('fLoc').value.trim();
+  const desc  = document.getElementById('fDesc').value.trim();
+  const src      = document.getElementById('fSrc').value.trim();
+  const lat      = parseFloat(document.getElementById('fLat').value);
+  const lng      = parseFloat(document.getElementById('fLng').value);
+  const countries = parseCountries(document.getElementById('fCountries').value);
+
+  if (!title) { toast('Wpisz tytuł wydarzenia', 'err'); return; }
+
+  if (editId) {
+    const idx = events.findIndex(e => e.id === editId);
+    if (idx >= 0) {
+      events[idx] = { ...events[idx], title, cat, emoji, date, loc, desc, src, countries,
+        lat: isNaN(lat)?null:lat, lng: isNaN(lng)?null:lng };
+    }
+    toast('✅ Wydarzenie zaktualizowane!', 'ok');
+  } else {
+    events.push({
+      id: 'u_' + Date.now(),
+      title, cat, emoji, date, loc, desc, src, countries,
+      lat: isNaN(lat)?null:lat,
+      lng: isNaN(lng)?null:lng,
+    });
+    toast('✅ Wydarzenie dodane!', 'ok');
+  }
+
+  saveStorage();
+  closeModal();
+  render();
+}
+
+// ═══════════════════════════════════════════════════
+// USUWANIE
+// ═══════════════════════════════════════════════════
+function deleteEvent(id) {
+  if (!confirm('Usunąć to wydarzenie?')) return;
+  events = events.filter(e => e.id !== id);
+  saveStorage();
+  map.closePopup();
+  if (selId === id) { selId = null; document.getElementById('selInfo').style.display='none'; }
+  render();
+  toast('🗑️ Usunięto wydarzenie', 'info');
+}
+
+// ═══════════════════════════════════════════════════
+// FILTRY / WYSZUKIWANIE
+// ═══════════════════════════════════════════════════
+function setFilter(cat, btn) {
+  activeFilter = cat;
+  document.querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+
+function onSearch(q) { searchQ = q; render(); }
+
+// ═══════════════════════════════════════════════════
+// PRZECIĄGANIE MARKERÓW
+// ═══════════════════════════════════════════════════
+let dragState = { id: null, latlng: null };
+
+function showDragBar(id, latlng, confirmed = false) {
+  dragState = { id, latlng };
+  let bar = document.getElementById('dragBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'dragBar';
+    bar.style.cssText = `
+      position:fixed; bottom:0; left:0; right:0; z-index:9001;
+      background:#1c2128; border-top:2px solid #58a6ff;
+      padding:10px 20px; display:flex; align-items:center; gap:14px;
+      font-size:13px; font-family:'Segoe UI',sans-serif;
+      transform:translateY(100%); transition:transform .25s;
+    `;
+    document.body.appendChild(bar);
+    requestAnimationFrame(() => bar.style.transform = 'translateY(0)');
+  }
+
+  const ev = events.find(e => e.id === id);
+  const name = ev ? ev.title : '';
+  const coords = latlng
+    ? `${latlng.lat.toFixed(4)}° N, ${latlng.lng.toFixed(4)}° E`
+    : '...';
+
+  bar.innerHTML = `
+    <span style="font-size:18px">📍</span>
+    <span style="color:#8b949e;flex:1">
+      <b style="color:#e6edf3">${name}</b>
+      ${confirmed ? `<span style="color:#58a6ff"> → ${coords}</span>` : '<span style="color:#8b949e"> przeciąganie...</span>'}
+    </span>
+    ${confirmed ? `
+      <button onclick="confirmDrag()" style="
+        padding:6px 18px; border-radius:7px; border:none;
+        background:#3fb950; color:#000; font-weight:700; font-size:12px; cursor:pointer;">
+        ✅ Zatwierdź
+      </button>
+      <button onclick="cancelDrag()" style="
+        padding:6px 14px; border-radius:7px;
+        border:1.5px solid #30363d; background:transparent;
+        color:#8b949e; font-size:12px; cursor:pointer;">
+        ✕ Anuluj
+      </button>` : ''}
+  `;
+}
+
+function confirmDrag() {
+  const { id, latlng } = dragState;
+  if (!id || !latlng) return;
+  const idx = events.findIndex(e => e.id === id);
+  if (idx >= 0) {
+    events[idx].lat = parseFloat(latlng.lat.toFixed(5));
+    events[idx].lng = parseFloat(latlng.lng.toFixed(5));
+    saveStorage();
+    render();
+    toast(`✅ Położenie zaktualizowane`, 'ok');
+  }
+  closeDragBar();
+}
+
+function cancelDrag() {
+  // cofnij marker na stare miejsce
+  const { id } = dragState;
+  const ev = events.find(e => e.id === id);
+  if (ev && markers[id]) {
+    markers[id].setLatLng([ev.lat, ev.lng]);
+  }
+  closeDragBar();
+}
+
+function closeDragBar() {
+  dragState = { id: null, latlng: null };
+  const bar = document.getElementById('dragBar');
+  if (bar) { bar.style.transform = 'translateY(100%)'; setTimeout(() => bar.remove(), 300); }
+}
+
+// ═══════════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════════
+let toastTimer;
+function toast(msg, type='info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className   = `toast ${type} show`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// ═══════════════════════════════════════════════════
+// EKSPORT / IMPORT  (bonus)
+// ═══════════════════════════════════════════════════
+function exportData() {
+  const blob = new Blob([JSON.stringify(events, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `world-events-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+}
+
+// skrót klawiszowy ESC zamyka modal
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeModal(); if (addMode) toggleAddMode(); }
+  if (e.key === 'n' && !document.getElementById('overlay').classList.contains('open')) toggleAddMode();
+});
+
+// ═══════════════════════════════════════════════════
+// TRYB ADMINA
+// ═══════════════════════════════════════════════════
+
+// Hasło przechowywane jako SHA-256 — zmień ADMIN_HASH na swój hash
+// Aby wygenerować hash swojego hasła: wpisz w konsoli przeglądarki:
+//   crypto.subtle.digest('SHA-256', new TextEncoder().encode('TWOJE_HASLO'))
+//     .then(b => console.log([...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')))
+const ADMIN_HASH = 'f5ee5143ddac5c1f0cb8df92295f8db244973ee883c444dba3a9d078e35c6f07';
+
+let isAdmin = false;
+
+async function hashStr(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map(x => x.toString(16).padStart(2,'0')).join('');
+}
+
+async function promptAdminLogin() {
+  if (isAdmin) { logoutAdmin(); return; }
+  const pw = prompt('🔐 Hasło administratora:');
+  if (!pw) return;
+  const h = await hashStr(pw);
+  if (h === ADMIN_HASH) {
+    isAdmin = true;
+    document.getElementById('addBtn').style.display = '';
+    document.getElementById('adminLoginBtn').textContent = '🔓 Wyloguj';
+    document.getElementById('adminLoginBtn').style.background = '#3fb950';
+    document.getElementById('adminLoginBtn').style.color = '#000';
+    render();
+    toast('✅ Tryb admina aktywny', 'ok');
+  } else {
+    toast('❌ Błędne hasło', 'err');
+  }
+}
+
+function logoutAdmin() {
+  isAdmin = false;
+  document.getElementById('addBtn').style.display = 'none';
+  document.getElementById('adminLoginBtn').textContent = '🔒 Admin';
+  document.getElementById('adminLoginBtn').style.background = '#30363d';
+  document.getElementById('adminLoginBtn').style.color = '#8b949e';
+  render();
+  toast('👋 Wylogowano z trybu admina', 'info');
+}
+
+// Skrót Ctrl+Shift+E
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.shiftKey && e.key === 'E') promptAdminLogin();
+});
+
+// ═══════════════════════════════════════════════════
+// START
+// ═══════════════════════════════════════════════════
+loadWorldTopo();
+loadEvents();
+</script>
+</body>
+</html>
