@@ -788,13 +788,13 @@ function render() {
 
   vis.forEach(ev => {
     if (ev.lat == null || ev.lng == null) return;
-    const m = L.marker([ev.lat, ev.lng], { icon: makeIcon(ev), draggable: true })
+    const m = L.marker([ev.lat, ev.lng], { icon: makeIcon(ev), draggable: isAdmin })
       .addTo(map)
       .bindPopup(makePopup(ev), { maxWidth:290, className:'custom-popup' })
       .on('click', () => selectEv(ev.id))
-      .on('dragstart', () => { m.closePopup(); showDragBar(ev.id, null); })
-      .on('drag',      (e) => { showDragBar(ev.id, e.latlng); })
-      .on('dragend',   (e) => { showDragBar(ev.id, e.target.getLatLng(), true); });
+      .on('dragstart', () => { if (!isAdmin) return; m.closePopup(); showDragBar(ev.id, null); })
+      .on('drag',      (e) => { if (!isAdmin) return; showDragBar(ev.id, e.latlng); })
+      .on('dragend',   (e) => { if (!isAdmin) return; showDragBar(ev.id, e.target.getLatLng(), true); });
     markers[ev.id] = m;
   });
 
@@ -1223,6 +1223,7 @@ async function promptAdminLogin() {
 
 function logoutAdmin() {
   isAdmin = false;
+  render();
   document.getElementById('addBtn').style.display = 'none';
   document.getElementById('adminLoginBtn').textContent = '🔒 Admin';
   document.getElementById('adminLoginBtn').style.background = '#30363d';
